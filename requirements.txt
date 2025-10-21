@@ -1,0 +1,14 @@
+crewai 
+langchain 
+langchain-openai
+openai 
+beautifulsoup4 
+requests 
+textblob 
+matplotlib 
+wordcloud
+python-dotenv
+pandas
+langdetect
+streamlit
+os
