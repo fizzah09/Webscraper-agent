@@ -3,7 +3,6 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
 
-# Load environment variables
 load_dotenv()
 
 def get_analyzer_agent():
@@ -30,5 +29,4 @@ def get_analyzer_agent():
         allow_delegation=False
     )
 
-# Create agent instance
-AnalyzerAgent = get_analyzer_agent()
+AnalyzerAgent = None

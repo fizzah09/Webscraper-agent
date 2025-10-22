@@ -3,7 +3,6 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
 
-# Load environment variables
 load_dotenv()
 
 def get_comment_agent():
@@ -34,5 +33,4 @@ def get_comment_agent():
         allow_delegation=False
     )
 
-# Create agent instance
-CommentAgent = get_comment_agent()
+CommentAgent = None

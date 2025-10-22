@@ -1,10 +1,10 @@
 from crewai import Crew, Task
-from crawleragent import CrawlerAgent
-from cleaneragent import CleanerAgent
-from analyzer_agent import AnalyzerAgent
-from sentiment_agent import SentimentAgent
-from reporter_agent import ReporterAgent
-from comment_agent import CommentAgent
+from crawleragent import get_crawler_agent
+from cleaneragent import get_cleaner_agent
+from analyzer_agent import get_analyzer_agent
+from sentiment_agent import get_sentiment_agent
+from reporter_agent import get_reporter_agent
+from comment_agent import get_comment_agent
 from datetime import datetime
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
@@ -100,6 +100,13 @@ if analyze_button and keyword:
     
     try:
         status_text.info("🤖 Initializing AI agents...")
+        
+        CrawlerAgent = get_crawler_agent()
+        CleanerAgent = get_cleaner_agent()
+        AnalyzerAgent = get_analyzer_agent()
+        SentimentAgent = get_sentiment_agent()
+        ReporterAgent = get_reporter_agent()
+        CommentAgent = get_comment_agent()
         
         tasks = []
         
@@ -198,7 +205,6 @@ if analyze_button and keyword:
         )
         tasks.append(comment_task)
         
-        # Create and execute crew
         status_text.info("Running multi-agent analysis...")
         
         crew = Crew(
@@ -209,7 +215,6 @@ if analyze_button and keyword:
         
         result = crew.kickoff()
         
-        # Mark all agents as complete
         for i in range(6):
             agent_names = ["🕷️ Crawler", "🧹 Cleaner", "🔍 Analyzer", "😊 Sentiment", "📝 Reporter", "💬 Commenter"]
             agent_containers[i].markdown(
@@ -220,11 +225,9 @@ if analyze_button and keyword:
         progress_bar.progress(1.0)
         status_text.success("✅ Analysis Complete!")
         
-        # Extract individual task outputs from CrewAI result
-        # The result object contains task_output for each task
+
         def get_task_output(task_index):
             try:
-                # Try to get from result's tasks_output list
                 if hasattr(result, 'tasks_output') and len(result.tasks_output) > task_index:
                     task_out = result.tasks_output[task_index]
                     if hasattr(task_out, 'raw'):
@@ -233,7 +236,6 @@ if analyze_button and keyword:
                         return str(task_out.exported_output)
                     else:
                         return str(task_out)
-                # Fallback to tasks list
                 elif len(tasks) > task_index:
                     task = tasks[task_index]
                     if hasattr(task, 'output') and task.output:
@@ -254,46 +256,38 @@ if analyze_button and keyword:
         report_output = get_task_output(4)
         comment_output = get_task_output(5)
         
-        # Store in session state with individual outputs
         full_result = str(result)
         st.session_state.result_text = full_result
         st.session_state.crawler_text = crawler_output
         st.session_state.cleaner_text = cleaner_output
         st.session_state.analyzer_text = analyzer_output
         st.session_state.sentiment_text = sentiment_output
-        st.session_state.report_text = report_output  # ReporterAgent output
-        st.session_state.comment_text = comment_output  # CommentAgent output
+        st.session_state.report_text = report_output  
+        st.session_state.comment_text = comment_output  
         st.session_state.analysis_complete = True
         
-        # Force rerun to show results
         st.rerun()
         
     except Exception as e:
         status_text.error(f"❌ Error: {str(e)}")
         st.error("**Troubleshooting:**\n- Verify .env has OPENROUTER_API_KEY\n- Check conda environment is activated\n- Ensure internet connection")
 
-# Display results if analysis was completed
 elif st.session_state.analysis_complete:
     st.markdown("---")
     st.markdown(f"### 📊 Analysis Results for: **{st.session_state.keyword}**")
     
     result_text = st.session_state.result_text
     
-    # Display results in tabs
     st.markdown("---")
     tab1, tab2, tab3, tab4 = st.tabs(["💬 Generated Comment", "📈 Insights", "☁️ Word Cloud", "📄 Full Report"])
     
     with tab1:
         st.markdown("### 💬 AI-Generated Comment")
         
-        # Use the dedicated comment text from session state
         generated_comment = st.session_state.get('comment_text', "")
         
-        # Clean up the comment
         if generated_comment:
-            # Remove any "Final Answer:" prefix
             generated_comment = re.sub(r'^(Comment:|Answer:|Final Answer:)\s*', '', generated_comment, flags=re.IGNORECASE)
-            # Take only first 2-3 sentences
             sentences = re.split(r'[.!?]+', generated_comment)
             clean_sentences = []
             for sent in sentences[:3]:
@@ -303,7 +297,6 @@ elif st.session_state.analysis_complete:
             if clean_sentences:
                 generated_comment = '. '.join(clean_sentences) + '.'
         
-        # Fallback: Generate based on sentiment if extraction failed
         if not generated_comment or len(generated_comment) < 30:
             if "positive" in result_text.lower() or "optimis" in result_text.lower():
                 generated_comment = f"This is a fascinating analysis of {st.session_state.keyword}! The positive outlook and comprehensive examination really showcase the transformative potential. I particularly appreciate the balanced perspective on both opportunities and ethical considerations."
@@ -345,10 +338,8 @@ elif st.session_state.analysis_complete:
     with tab2:
         st.markdown("### 📈 Sentiment Analysis Insights")
         
-        # Display the sentiment analysis from SentimentAgent
         sentiment_text = st.session_state.sentiment_text if st.session_state.sentiment_text else result_text
         
-        # Determine sentiment for metrics
         sentiment = "Neutral 😐"
         if any(word in sentiment_text.lower() for word in ["positive", "optimistic", "great", "excellent", "beneficial", "predominantly positive", "overwhelmingly positive"]):
             sentiment = "Positive 😊"
@@ -365,7 +356,7 @@ elif st.session_state.analysis_complete:
         
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); padding: 1.5rem; border-radius: 15px; color: white; margin: 1rem 0;">
-            <h4 style="color: white;">� Sentiment Analysis Report</h4>
+            <h4 style="color: white;">Sentiment Analysis Report</h4>
             <div style="color: white; line-height: 1.8; white-space: pre-wrap;">{sentiment_text}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -383,7 +374,6 @@ elif st.session_state.analysis_complete:
         st.markdown("### ☁️ Word Cloud Visualization")
         
         try:
-            # Generate word cloud
             wordcloud = WordCloud(
                 width=1000,
                 height=500,
@@ -392,7 +382,6 @@ elif st.session_state.analysis_complete:
                 max_words=100
             ).generate(result_text)
             
-            # Display
             fig, ax = plt.subplots(figsize=(12, 6))
             ax.imshow(wordcloud, interpolation='bilinear')
             ax.axis('off')
@@ -403,7 +392,6 @@ elif st.session_state.analysis_complete:
             
             st.info("💡 Larger words appear more frequently in the analysis")
             
-            # Download word cloud
             buf = io.BytesIO()
             fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
             buf.seek(0)
@@ -421,17 +409,13 @@ elif st.session_state.analysis_complete:
     with tab4:
         st.markdown("### 📄 Complete Analysis Report")
         
-        # Use the dedicated report text (not the comment!)
         report_display = st.session_state.get('report_text', result_text)
         
-        # Display report in an expandable section with better formatting
         with st.expander("📋 View Full Report", expanded=True):
             st.markdown(report_display)
         
-        # Also show in text area for easy copying
         st.text_area("Raw Text (for copying):", report_display, height=300, key="full_report_display")
         
-        # Download button
         st.download_button(
             label="📥 Download Full Report as TXT",
             data=report_display,
@@ -441,7 +425,6 @@ elif st.session_state.analysis_complete:
             use_container_width=True
         )
         
-        # Show report stats
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("📊 Total Words", len(report_display.split()))
@@ -452,7 +435,6 @@ elif st.session_state.analysis_complete:
     
     st.balloons()
     
-    # Add button to start new analysis
     st.markdown("---")
     if st.button("🔄 Analyze Another Keyword", type="secondary", use_container_width=True):
         st.session_state.analysis_complete = False
@@ -462,7 +444,6 @@ elif st.session_state.analysis_complete:
 elif analyze_button and not keyword:
     st.warning("⚠️ Please enter a keyword to analyze!")
 
-# Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 1rem;'>

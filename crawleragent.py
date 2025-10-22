@@ -3,11 +3,9 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
 
-# Load environment variables
 load_dotenv()
 
 def get_crawler_agent():
-    """Create and return the Crawler Agent"""
     llm = ChatOpenAI(
         model="gpt-4o-mini",
         api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -30,5 +28,4 @@ def get_crawler_agent():
         allow_delegation=False
     )
 
-# Create agent instance
-CrawlerAgent = get_crawler_agent()
+CrawlerAgent = None

@@ -3,7 +3,6 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
 
-# Load environment variables
 load_dotenv()
 
 def get_sentiment_agent():
@@ -31,5 +30,4 @@ def get_sentiment_agent():
         allow_delegation=False
     )
 
-# Create agent instance
-SentimentAgent = get_sentiment_agent()
+SentimentAgent = None

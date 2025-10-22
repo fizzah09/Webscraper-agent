@@ -3,7 +3,6 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
 
-# Load environment variables
 load_dotenv()
 
 def get_cleaner_agent():
@@ -30,5 +29,4 @@ def get_cleaner_agent():
         allow_delegation=False
     )
 
-# Create agent instance
-CleanerAgent = get_cleaner_agent()
+CleanerAgent = None
