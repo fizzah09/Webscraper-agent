@@ -1,5 +1,5 @@
 from crewai import Crew, Task
-from crawleragent import get_crawler_agent
+from crawleragent import get_crawler_agent, search_duckduckgo, search_bing
 from cleaneragent import get_cleaner_agent
 from analyzer_agent import get_analyzer_agent
 from sentiment_agent import get_sentiment_agent
@@ -10,6 +10,8 @@ from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 import io
 import streamlit as st
+import json
+from sentiment_utils import analyze_sentiment_for_urls
 import os
 import warnings
 import re
@@ -18,7 +20,7 @@ os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 st.set_page_config(
     page_title="CrewAI Blog Analyzer & Commenter",
-    page_icon="🤖",
+    page_icon="😁",
     layout="wide"
 )
 st.markdown("""
@@ -41,7 +43,7 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-st.markdown('<div class="main-header">🤖 CrewAI Blog Analyzer & Comment Generator</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">CrewAI Blog Analyzer & Comment Generator</div>', unsafe_allow_html=True)
 with st.sidebar:
     st.markdown("## 🚀 Agent Pipeline")
     st.markdown("---")
@@ -82,8 +84,35 @@ keyword = st.text_input(
     placeholder="e.g., artificial intelligence, climate change, cryptocurrency",
     label_visibility="collapsed"
 )
+num_results = st.number_input("Number of blogs to find:", min_value=1, max_value=50, value=5, step=1, help="How many search results to collect and analyze")
 
-analyze_button = st.button("🚀 Start Analysis & Generate Comment", type="primary", use_container_width=True)
+analyze_button = st.button(" Start Analysis & Generate Comment", type="primary", use_container_width=True)
+
+# Pre-check for LLM API keys to avoid confusing crewai/LLM initialization errors
+llm_present = bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY"))
+if not llm_present:
+    st.error(
+        "Missing LLM API key: set either OPENAI_API_KEY or OPENROUTER_API_KEY in your environment (or .env).\n"
+        "Without a valid key the agents cannot initialize.\n"
+        "Troubleshooting: verify your .env, activate your conda env, and restart Streamlit."
+    )
+    st.stop()
+
+# Show currently discovered URLs (updates during analysis)
+with st.sidebar.expander("🔎 Discovered URLs (live)", expanded=False):
+    urls_sidebar = st.session_state.get('crawler_urls', [])
+    if urls_sidebar:
+        for u in urls_sidebar:
+            st.markdown(f"- [{u}]({u})")
+    else:
+        st.markdown("_(no URLs discovered yet)_")
+
+# Inline short preview of discovered URLs (updates during analysis)
+urls_preview_inline = st.session_state.get('crawler_urls', [])
+if urls_preview_inline:
+    st.markdown("### 🔗 Discovered URLs")
+    for u in urls_preview_inline:
+        st.markdown(f"- [{u}]({u})")
 
 if analyze_button and keyword:
     st.session_state.keyword = keyword
@@ -99,7 +128,7 @@ if analyze_button and keyword:
         agent_containers[i] = st.empty()
     
     try:
-        status_text.info("🤖 Initializing AI agents...")
+        status_text.info("⭐Initializing AI agents...")
         
         CrawlerAgent = get_crawler_agent()
         CleanerAgent = get_cleaner_agent()
@@ -109,6 +138,49 @@ if analyze_button and keyword:
         CommentAgent = get_comment_agent()
         
         tasks = []
+
+        # Run a deterministic web search to get real URLs for the keyword (prefer DuckDuckGo, fallback to Bing)
+        try:
+            urls = search_duckduckgo(keyword, max_results=num_results)
+            if not urls:
+                urls = search_bing(keyword, max_results=num_results)
+            # resolve redirects to show clean target URLs
+            try:
+                from crawleragent import resolve_final_urls
+                urls = resolve_final_urls(urls)
+            except Exception:
+                pass
+            st.session_state.crawler_text = "\n".join(urls) if urls else ""
+            st.session_state.crawler_urls = urls
+            if urls:
+                st.session_state.sentiment_results = analyze_sentiment_for_urls(urls)
+                lines = [f"{item.get('label','unknown').upper()} ({item.get('polarity')}) - {item.get('url')}" for item in st.session_state.sentiment_results]
+                st.session_state.sentiment_text = "\n".join(lines)
+            else:
+                st.session_state.sentiment_results = []
+
+            # Immediately show discovered URLs and per-URL sentiment so the user sees findings
+            try:
+                urls_preview = st.session_state.get('crawler_urls', [])
+                sr_preview = st.session_state.get('sentiment_results', [])
+                if urls_preview:
+                    st.markdown("### 🔎 Discovered blogs & per-URL sentiment")
+                    for item in sr_preview:
+                        url = item.get('url')
+                        label = item.get('label', 'unknown')
+                        pol = item.get('polarity')
+                        subj = item.get('subjectivity')
+                        excerpt = item.get('excerpt', '')
+                        st.markdown(f"- **{label.upper()}** — ({pol}, subj={subj}) — [{url}]({url})")
+                        if excerpt:
+                            st.text(excerpt[:400] + ("..." if len(excerpt) > 400 else ""))
+                    st.markdown('---')
+            except Exception:
+                # non-critical; continue without blocking analysis
+                pass
+        except Exception:
+            st.session_state.crawler_urls = st.session_state.get('crawler_urls', [])
+            st.session_state.sentiment_results = st.session_state.get('sentiment_results', [])
         
         agent_containers[0].markdown(
             '<div class="agent-box">🕷️ <b>Crawler Agent:</b> Searching for blog posts...</div>',
@@ -167,9 +239,24 @@ if analyze_button and keyword:
             unsafe_allow_html=True
         )
         progress_bar.progress(0.75)
-        
+
+        sentiment_summary = ""
+        try:
+            sr = st.session_state.get('sentiment_results', [])
+            if sr:
+                sentiment_summary = json.dumps(sr, ensure_ascii=False, indent=2)
+        except Exception:
+            sentiment_summary = str(st.session_state.get('sentiment_text', ''))
+
+        crawler_urls_text = "\n".join(st.session_state.get('crawler_urls', []))
+
         report_task = Task(
-            description=f"Create a comprehensive analysis report about '{keyword}' combining all findings.",
+            description=(
+                f"Create a comprehensive analysis report about '{keyword}' combining all findings.\n"
+                f"Include the following detected source URLs:\n{crawler_urls_text}\n\n"
+                f"Per-URL sentiment data (polarity/subjectivity/label):\n{sentiment_summary}\n\n"
+                "Use the Analyzer and Sentiment outputs to produce a single, well-structured report"
+            ),
             agent=ReporterAgent,
             expected_output="Detailed analysis report with all insights"
         )
@@ -262,6 +349,7 @@ if analyze_button and keyword:
         st.session_state.cleaner_text = cleaner_output
         st.session_state.analyzer_text = analyzer_output
         st.session_state.sentiment_text = sentiment_output
+        # sentiment results are prepared earlier via search_duckduckgo and sentiment_utils
         st.session_state.report_text = report_output  
         st.session_state.comment_text = comment_output  
         st.session_state.analysis_complete = True
@@ -331,9 +419,47 @@ elif st.session_state.analysis_complete:
             )
         
         with col2:
-            blog_url = st.text_input("📝 Blog URL (optional):", key="blog_url", placeholder="https://example.com/blog")
-        
-        st.info("💡 **How to use:** Click 'Copy Comment' to download, then paste on the blog post!")
+            # Target posting UI removed. Posting to arbitrary external sites is disabled.
+            st.info("Posting to arbitrary external sites has been removed from this UI for safety. Use the Facebook Page flow to publish posts including your generated comment.")
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown("### 📣 Post to Facebook Page")
+    # Support both FB_PAGE_* and legacy FACEBOOK_* env var names
+    default_fb_id = os.getenv("FB_PAGE_ID") or os.getenv("FACEBOOK_ID") or ""
+    default_fb_token = os.getenv("FB_PAGE_TOKEN") or os.getenv("FACEBOOK_TOKEN") or ""
+    fb_page_id = st.text_input("Facebook Page ID:", value=default_fb_id, help="Page ID to post to")
+    fb_page_token = st.text_input("Facebook Page Access Token:", value=default_fb_token, help="Page access token with pages_manage_posts", type="password")
+    fb_link = st.text_input("Link to share on Page (optional):", value="")
+    if st.button("📤 Post to Facebook Page (create post + comment)"):
+        if not fb_page_id or not fb_page_token:
+            st.warning("Please provide FB_PAGE_ID and FB_PAGE_TOKEN (or set them in environment variables).")
+        else:
+            st.info("Creating Page post and adding comment...")
+            try:
+                from commenter_poster import create_page_post_and_comment, generate_comment_for_url
+                topics = [t.strip() for t in st.session_state.get('keyword','').split(',')] if st.session_state.get('keyword') else []
+                # Generate a personalized comment first so we can include it in the post body
+                gen_ok, gen_out = generate_comment_for_url(fb_link or "", topics)
+                comment_to_use = gen_out if gen_ok else None
+
+                success, details = create_page_post_and_comment(
+                    fb_page_id,
+                    fb_page_token,
+                    fb_link or "",
+                    topics,
+                    excerpt=None,
+                    comment_text=comment_to_use,
+                    include_comment_in_post=True,
+                    post_as_comment=False,  # do NOT post as a separate comment
+                )
+                if success:
+                    st.success("Facebook post + comment created: " + details)
+                else:
+                    st.error("Failed: " + details)
+            except Exception as e:
+                st.error(f"Error while posting to Facebook: {e}")
+    
+    st.info("💡 Tip: Use 'Copy Comment' to copy the generated comment. To publish, use the Facebook Page flow above or your own publishing workflow.")
     
     with tab2:
         st.markdown("### 📈 Sentiment Analysis Insights")
@@ -369,6 +495,51 @@ elif st.session_state.analysis_complete:
             use_container_width=True,
             key="download_sentiment"
         )
+        # Show per-URL table with actions
+        st.markdown("### 🔗 Discovered URLs & Per-URL Actions")
+        urls = st.session_state.get('crawler_urls', [])
+        sr = st.session_state.get('sentiment_results', [])
+        if urls and sr:
+            for item in sr:
+                url = item.get('url')
+                label = item.get('label', 'unknown')
+                pol = item.get('polarity')
+                excerpt = item.get('excerpt','')
+                col1, col2, col3 = st.columns([6,2,2])
+                with col1:
+                    st.markdown(f"**{label.upper()} ({pol})** — [{url}]({url})")
+                    st.write(excerpt[:300] + ("..." if len(excerpt)>300 else ""))
+                with col2:
+                    if st.button(f"Generate comment for this URL", key=f"gen_{url}"):
+                        try:
+                            CommentAgent = get_comment_agent()
+                            task = Task(
+                                description=(
+                                    f"Write a short 1-2 sentence blog comment for the article at {url}.\n"
+                                    f"Article excerpt: {excerpt[:800]}\n"
+                                    f"Detected sentiment: {label} (polarity={pol})\n"
+                                    "Output ONLY the comment text, 1-2 sentences."
+                                ),
+                                agent=CommentAgent,
+                                expected_output="Short blog comment"
+                            )
+                            one_crew = Crew(agents=[CommentAgent], tasks=[task], verbose=False)
+                            one_result = one_crew.kickoff()
+                            # try to extract output
+                            out = ""
+                            if hasattr(one_result, 'tasks_output') and one_result.tasks_output:
+                                to = one_result.tasks_output[0]
+                                out = getattr(to, 'raw', None) or getattr(to, 'exported_output', None) or str(to)
+                            st.success("Generated comment:")
+                            st.write(out)
+                            # store per-url comment
+                            st.session_state.setdefault('url_comments', {})[url] = out
+                        except Exception as e:
+                            st.error(f"Failed to generate comment: {e}")
+                with col3:
+                    st.info("Posting comments to arbitrary external sites has been disabled for safety.")
+        else:
+            st.info('No discovered URLs to display. Run an analysis to collect links.')
     
     with tab3:
         st.markdown("### ☁️ Word Cloud Visualization")
@@ -447,7 +618,6 @@ elif analyze_button and not keyword:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 1rem;'>
-    <p>made by students of SIR HAMMAD</p>
     <p>🤖 Powered by <strong>CrewAI</strong> + <strong>OpenRouter</strong> + <strong>Streamlit</strong></p>
     <p style='font-size: 0.9rem;'>AI-Generated Blog Comments | Multi-Agent Analysis System</p>
 </div>
